@@ -35,6 +35,13 @@ only what is relevant to them (their commitments, mentions of their name, decisi
 that affect them) — this mirrors Deng et al.'s aspect-based classification into \
 decision / action-item / background / discussion sentences.
 
+Important rules:
+- Preserve all speaker names exactly as they appear in the transcript.
+- Do not replace names with pronouns or generic terms like "one participant" or "a team member".
+- Every person mentioned by name must appear by name in the output summaries.
+- Include specific deadlines, dates, and task assignments explicitly.
+- Only include facts explicitly stated in the transcript. Do not infer or assume anything.
+
 Transcript (each line is "[start-end] speaker: text"):
 {lines}
 

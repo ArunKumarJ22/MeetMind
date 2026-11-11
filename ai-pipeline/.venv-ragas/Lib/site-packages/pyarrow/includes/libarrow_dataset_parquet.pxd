@@ -63,8 +63,6 @@ cdef extern from "arrow/dataset/api.h" namespace "arrow::dataset" nogil:
             "arrow::dataset::ParquetFileFormat::ReaderOptions":
         unordered_set[c_string] dict_columns
         TimeUnit coerce_int96_timestamp_unit
-        Type binary_type
-        Type list_type
 
     cdef cppclass CParquetFileFormat "arrow::dataset::ParquetFileFormat"(
             CFileFormat):

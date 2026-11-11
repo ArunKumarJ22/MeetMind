@@ -220,7 +220,7 @@ Result<int64_t> PyReadableFile::Read(int64_t nbytes, void* out) {
     OwnedRef bytes;
     RETURN_NOT_OK(file_->Read(nbytes, bytes.ref()));
     PyObject* bytes_obj = bytes.obj();
-    ARROW_DCHECK(bytes_obj != NULL);
+    DCHECK(bytes_obj != NULL);
 
     Py_buffer py_buf;
     if (!PyObject_GetBuffer(bytes_obj, &py_buf, PyBUF_ANY_CONTIGUOUS)) {
@@ -246,7 +246,7 @@ Result<std::shared_ptr<Buffer>> PyReadableFile::Read(int64_t nbytes) {
     } else {
       RETURN_NOT_OK(file_->Read(nbytes, buffer_obj.ref()));
     }
-    ARROW_DCHECK(buffer_obj.obj() != NULL);
+    DCHECK(buffer_obj.obj() != NULL);
 
     return PyBuffer::FromPyObject(buffer_obj.obj());
   });
