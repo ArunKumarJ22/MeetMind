@@ -1,0 +1,23 @@
+# WhisperX — transcription + word alignment + speaker diarization in one library.
+# Replaces both OpenAI Whisper API (transcription.py) and pyannote (old real_diarization.py)
+# when USE_REAL_DIARIZATION=true.
+#
+# Install with:
+#   pip install -r requirements-whisperx.txt
+#
+# Before running, you also need to:
+#   1. Accept the pyannote/segmentation-3.0 license at:
+#      https://huggingface.co/pyannote/segmentation-3.0
+#   2. Create a HuggingFace read token at:
+#      https://huggingface.co/settings/tokens
+#   3. Add to your .env:
+#      HUGGINGFACE_TOKEN=hf_...
+#      USE_REAL_DIARIZATION=true
+#
+# GPU users: also install torch with CUDA support first:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# CPU users: the packages below will pull in CPU-only torch automatically.
+
+whisperx>=3.1.1
+torch>=2.1.0
+torchaudio>=2.1.0

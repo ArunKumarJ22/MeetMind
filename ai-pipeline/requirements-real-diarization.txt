@@ -1,9 +1,0 @@
-# Optional — only needed if USE_REAL_DIARIZATION=true (see real_diarization.py).
-# NOT included in requirements.txt because torch is a multi-GB download and this
-# genuinely isn't needed to run the app in mock mode or to test the rest of the
-# pipeline against real OpenAI/Pinecone calls.
-#
-# Install with: pip install -r requirements-real-diarization.txt
-pyannote.audio>=3.1.0
-torch>=2.1.0
-torchaudio>=2.1.0
