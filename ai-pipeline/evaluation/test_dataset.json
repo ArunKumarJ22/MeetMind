@@ -2,26 +2,56 @@
   {
     "question": "What was the retrieval latency reported for the RAG pipeline?",
     "ground_truth": "The RAG pipeline retrieves documents in under two seconds using the Pinecone index.",
-    "reference_context": "Let's start the standup, quick round. I finished the diarization integration yesterday, testing accuracy today. Great. Isabel, can you send the dashboard mockups by Friday? Yes, Friday works for me. The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."
+    "segments": [
+      {"start": 0.0,  "end": 4.2,  "speaker": "Host",         "text": "Let's start the standup, quick round."},
+      {"start": 4.5,  "end": 11.0, "speaker": "Rajamanickam", "text": "I finished the diarization integration yesterday, testing accuracy today."},
+      {"start": 11.3, "end": 18.0, "speaker": "Host",         "text": "Great. Isabel, can you send the dashboard mockups by Friday?"},
+      {"start": 18.2, "end": 21.0, "speaker": "Isabel",       "text": "Yes, Friday works for me."},
+      {"start": 21.5, "end": 30.0, "speaker": "Arunkumar",    "text": "The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."}
+    ]
   },
   {
     "question": "What task was assigned to Isabel during the meeting?",
     "ground_truth": "Isabel was asked to send the dashboard mockups by Friday.",
-    "reference_context": "Let's start the standup, quick round. I finished the diarization integration yesterday, testing accuracy today. Great. Isabel, can you send the dashboard mockups by Friday? Yes, Friday works for me. The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."
+    "segments": [
+      {"start": 0.0,  "end": 4.2,  "speaker": "Host",         "text": "Let's start the standup, quick round."},
+      {"start": 4.5,  "end": 11.0, "speaker": "Rajamanickam", "text": "I finished the diarization integration yesterday, testing accuracy today."},
+      {"start": 11.3, "end": 18.0, "speaker": "Host",         "text": "Great. Isabel, can you send the dashboard mockups by Friday?"},
+      {"start": 18.2, "end": 21.0, "speaker": "Isabel",       "text": "Yes, Friday works for me."},
+      {"start": 21.5, "end": 30.0, "speaker": "Arunkumar",    "text": "The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."}
+    ]
   },
   {
-    "question": "What was Rajamanickam working on?",
-    "ground_truth": "Rajamanickam finished the diarization integration and was testing its accuracy.",
-    "reference_context": "Let's start the standup, quick round. I finished the diarization integration yesterday, testing accuracy today. Great. Isabel, can you send the dashboard mockups by Friday? Yes, Friday works for me. The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."
+    "question": "Which participant completed the diarization integration?",
+    "ground_truth": "Rajamanickam completed the diarization integration and was testing its accuracy.",
+    "segments": [
+      {"start": 0.0,  "end": 4.2,  "speaker": "Host",         "text": "Let's start the standup, quick round."},
+      {"start": 4.5,  "end": 11.0, "speaker": "Rajamanickam", "text": "I finished the diarization integration yesterday, testing accuracy today."},
+      {"start": 11.3, "end": 18.0, "speaker": "Host",         "text": "Great. Isabel, can you send the dashboard mockups by Friday?"},
+      {"start": 18.2, "end": 21.0, "speaker": "Isabel",       "text": "Yes, Friday works for me."},
+      {"start": 21.5, "end": 30.0, "speaker": "Arunkumar",    "text": "The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."}
+    ]
   },
   {
     "question": "What technology is used for document retrieval in the pipeline?",
-    "ground_truth": "The pipeline uses Pinecone for document retrieval.",
-    "reference_context": "Let's start the standup, quick round. I finished the diarization integration yesterday, testing accuracy today. Great. Isabel, can you send the dashboard mockups by Friday? Yes, Friday works for me. The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."
+    "ground_truth": "The pipeline uses the Pinecone index for document retrieval.",
+    "segments": [
+      {"start": 0.0,  "end": 4.2,  "speaker": "Host",         "text": "Let's start the standup, quick round."},
+      {"start": 4.5,  "end": 11.0, "speaker": "Rajamanickam", "text": "I finished the diarization integration yesterday, testing accuracy today."},
+      {"start": 11.3, "end": 18.0, "speaker": "Host",         "text": "Great. Isabel, can you send the dashboard mockups by Friday?"},
+      {"start": 18.2, "end": 21.0, "speaker": "Isabel",       "text": "Yes, Friday works for me."},
+      {"start": 21.5, "end": 30.0, "speaker": "Arunkumar",    "text": "The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."}
+    ]
   },
   {
     "question": "What is the deadline for the dashboard mockups?",
     "ground_truth": "The dashboard mockups are due on Friday.",
-    "reference_context": "Let's start the standup, quick round. I finished the diarization integration yesterday, testing accuracy today. Great. Isabel, can you send the dashboard mockups by Friday? Yes, Friday works for me. The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."
+    "segments": [
+      {"start": 0.0,  "end": 4.2,  "speaker": "Host",         "text": "Let's start the standup, quick round."},
+      {"start": 4.5,  "end": 11.0, "speaker": "Rajamanickam", "text": "I finished the diarization integration yesterday, testing accuracy today."},
+      {"start": 11.3, "end": 18.0, "speaker": "Host",         "text": "Great. Isabel, can you send the dashboard mockups by Friday?"},
+      {"start": 18.2, "end": 21.0, "speaker": "Isabel",       "text": "Yes, Friday works for me."},
+      {"start": 21.5, "end": 30.0, "speaker": "Arunkumar",    "text": "The RAG pipeline is retrieving documents in under two seconds now with the Pinecone index."}
+    ]
   }
 ]

@@ -1,55 +1,61 @@
 """
 Ragas evaluation for MeetMind's summarization pipeline.
-
-What this tests:
-  - For each Q&A pair in test_dataset.json, we build a MeetMind Transcript from
-    the reference_context, run aspect_based_role_summaries (the same function the
-    real pipeline calls for professional sessions), then ask GPT to answer the
-    question using the summary as the retrieved context.
-  - Ragas scores each (question, answer, context, ground_truth) tuple on:
-      faithfulness      — is the answer grounded in the transcript text? (no hallucination)
-      answer_relevancy  — does the answer actually address the question asked?
-
-Why summarization and not rag.retrieve_for_mention:
-  retrieve_for_mention requires a live Pinecone index with pre-uploaded documents,
-  which makes it impossible to run in CI without real API state. Summarization is
-  the core AI output every session produces — evaluating it here gives you a stable,
-  reproducible quality gate that runs on every push.
-
-Thresholds (start conservative, raise them as you improve the pipeline):
-  faithfulness     >= 0.70
-  answer_relevancy >= 0.70
+Written for Ragas >= 0.3 (the new API with llm_factory, embedding_factory,
+instantiated metric objects, EvaluationDataset, and new column names).
 
 Run locally:
-  export OPENAI_API_KEY="sk-..."
+  $env:OPENAI_API_KEY = "sk-..."          # Windows PowerShell
   cd ai-pipeline
-  pytest evaluation/ragas_eval.py -v -s
-
-CI: .github/workflows/ragas_eval.yml runs this automatically on every PR.
+  python -m pytest evaluation/ragas_eval.py -v -s
 """
-
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
 from pathlib import Path
 
-import pytest
-from datasets import Dataset
-from openai import OpenAI
-from ragas import evaluate
-from ragas.metrics import answer_relevancy, faithfulness
-
-# Make meetmind_ai importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from meetmind_ai.schemas import SessionType, Transcript, TranscriptSegment
+import pytest
+from openai import OpenAI
+from langchain_openai import OpenAIEmbeddings
+
+# ── Ragas >= 0.3 imports ─────────────────────────────────────────────────────
+from ragas import evaluate, EvaluationDataset, SingleTurnSample
+from ragas.llms import llm_factory
+from ragas.metrics import Faithfulness
+
+try:
+    from ragas.metrics import ResponseRelevancy
+except ImportError:  # pragma: no cover - compatibility with older Ragas releases
+    from ragas.metrics import AnswerRelevancy as ResponseRelevancy
+
+from meetmind_ai.schemas import Transcript, TranscriptSegment
 from meetmind_ai.summarization import aspect_based_role_summaries
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _resolve_relevancy_column(results) -> str:
+    """Support both Ragas naming schemes: response_relevancy and answer_relevancy."""
+    for candidate in ("response_relevancy", "answer_relevancy"):
+        if candidate in results.columns:
+            return candidate
+
+    relevancy_like = [
+        column
+        for column in results.columns
+        if "relev" in str(column).lower()
+    ]
+    if relevancy_like:
+        return relevancy_like[0]
+
+    raise KeyError(
+        "Unable to find a relevancy column in the Ragas evaluation output. "
+        f"Available columns: {list(results.columns)}"
+    )
+
 
 def _load_test_dataset() -> list[dict]:
     path = Path(__file__).parent / "test_dataset.json"
@@ -57,36 +63,27 @@ def _load_test_dataset() -> list[dict]:
         return json.load(f)
 
 
-def _build_transcript(session_id: str, raw_text: str) -> Transcript:
-    """
-    Wraps a plain text string into the Transcript schema MeetMind's pipeline uses.
-    We treat the whole reference context as a single segment — no diarization needed
-    for evaluation purposes, since we're testing summarization quality, not speaker
-    attribution.
-    """
+def _build_transcript(session_id: str, segments_data: list[dict]) -> Transcript:
+    """Build a real MeetMind Transcript with named speaker segments."""
+    segments = [
+        TranscriptSegment(
+            start=s["start"],
+            end=s["end"],
+            text=s["text"],
+            speaker=s["speaker"],
+        )
+        for s in segments_data
+    ]
     return Transcript(
         session_id=session_id,
-        segments=[
-            TranscriptSegment(
-                start=0.0,
-                end=60.0,
-                text=raw_text,
-                speaker="Participant",
-            )
-        ],
-        raw_text=raw_text,
+        segments=segments,
+        raw_text=" ".join(s.text for s in segments),
         noise_score=0.0,
     )
 
 
-def _ask_question_with_context(question: str, context: str) -> str:
-    """
-    Calls GPT to answer the question using ONLY the provided context.
-    This is the 'answer' Ragas will score for faithfulness and relevancy.
-    We use gpt-4o-mini here (cheaper than gpt-4o) since this is a scoring
-    step, not the main pipeline.
-    """
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+def _ask_question_with_context(question: str, context: str, client: OpenAI) -> str:
+    """Ask GPT to answer using ONLY the provided summary context."""
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -94,10 +91,11 @@ def _ask_question_with_context(question: str, context: str) -> str:
                 "role": "system",
                 "content": (
                     "You are a helpful assistant. Answer the user's question "
-                    "using ONLY the information provided in the context below. "
-                    "If the context does not contain enough information to answer "
-                    "the question, say 'Not found in context.' "
-                    "Do not use any outside knowledge.\n\n"
+                    "using ONLY the information in the context below. "
+                    "If the answer is not in the context, say exactly: "
+                    "'Not found in context.'\n"
+                    "Always answer in a complete sentence that restates the question topic. "
+                    "For example: 'The deadline for X is Friday' not just 'Friday'.\n\n"
                     f"Context:\n{context}"
                 ),
             },
@@ -111,96 +109,109 @@ def _ask_question_with_context(question: str, context: str) -> str:
 
 def _get_summary_context(transcript: Transcript) -> str:
     """
-    Runs MeetMind's real summarization on the transcript and returns the host
-    summary as the retrieved context. This is what Ragas uses as 'contexts'.
+    Run MeetMind's real summarization and return host + participant summaries
+    concatenated so speaker-specific questions are answerable.
     """
     role_summaries = aspect_based_role_summaries(transcript)
-    # host_summary is always the first element (see summarization.py line:
-    # summaries = [RoleSummary(role="Host", summary=data["host_summary"])])
-    host_summary = next(
+    host = next(
         (s.summary for s in role_summaries if s.role == "Host"),
         role_summaries[0].summary if role_summaries else transcript.raw_text,
     )
-    return host_summary
+    participant_text = "\n".join(
+        f"{s.role}: {s.summary}"
+        for s in role_summaries
+        if s.role != "Host"
+    )
+    return f"{host}\n\nParticipant summaries:\n{participant_text}"
 
 
-# ── build the evaluation dataset ─────────────────────────────────────────────
+# ── build the EvaluationDataset (Ragas >= 0.3 format) ────────────────────────
 
-def build_eval_dataset() -> Dataset:
-    """
-    For each test case:
-      1. Build a Transcript from the reference_context string
-      2. Run MeetMind's summarization → get the host summary as context
-      3. Ask GPT to answer the question using that context
-      4. Collect (question, answer, contexts, ground_truth) for Ragas
-    """
+def build_eval_dataset(openai_client: OpenAI) -> EvaluationDataset:
     test_cases = _load_test_dataset()
-
-    questions: list[str] = []
-    answers: list[str] = []
-    contexts: list[list[str]] = []
-    ground_truths: list[str] = []
+    samples: list[SingleTurnSample] = []
 
     for i, case in enumerate(test_cases):
-        session_id = f"eval-session-{i}"
-        transcript = _build_transcript(session_id, case["reference_context"])
-
-        # run the real MeetMind summarization
-        summary_context = _get_summary_context(transcript)
-
-        # get a GPT answer grounded in the summary
-        answer = _ask_question_with_context(case["question"], summary_context)
-
-        questions.append(case["question"])
-        answers.append(answer)
-        contexts.append([summary_context])          # Ragas expects list[list[str]]
-        ground_truths.append(case["ground_truth"])
+        transcript = _build_transcript(f"eval-{i}", case["segments"])
+        context = _get_summary_context(transcript)
+        answer = _ask_question_with_context(case["question"], context, openai_client)
 
         print(f"\n[{i+1}/{len(test_cases)}] Q: {case['question']}")
-        print(f"  context (first 120 chars): {summary_context[:120]}...")
-        print(f"  answer:  {answer[:120]}")
+        print(f"  context (first 200 chars): {context[:200]}...")
+        print(f"  answer: {answer}")
 
-    return Dataset.from_dict({
-        "question": questions,
-        "answer": answers,
-        "contexts": contexts,
-        "ground_truth": ground_truths,
-    })
+        samples.append(SingleTurnSample(
+            user_input=case["question"],
+            response=answer,
+            retrieved_contexts=[context],
+            reference=case["ground_truth"],
+        ))
+
+    return EvaluationDataset(samples=samples)
 
 
-# ── the pytest test — this is what GitHub Actions runs ───────────────────────
-
+# ── the pytest test ───────────────────────────────────────────────────────────
 
 def test_rag_quality():
-    dataset = build_eval_dataset()
+    """
+    Runs MeetMind's summarization on the gold dataset and asserts that
+    faithfulness and response relevancy meet minimum thresholds.
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    Thresholds:
+      faithfulness       >= 0.70  (no hallucination)
+      response_relevancy >= 0.70  (answer addresses the question)
+    """
+    api_key = os.environ["OPENAI_API_KEY"]
+    openai_client = OpenAI(api_key=api_key)
 
-    try:
-        scores = evaluate(
-            dataset,
-            metrics=[faithfulness, answer_relevancy],
-        )
+    # Ragas expects LangChain-style embeddings for the relevancy metric,
+    # not the ragas openai provider object.
+    ragas_llm = llm_factory(model="gpt-4o-mini", client=openai_client)
+    ragas_embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        api_key=api_key,
+    )
 
-        results = scores.to_pandas()
+    # metrics must be instantiated objects in Ragas >= 0.3
+    metrics = [
+        Faithfulness(llm=ragas_llm),
+        ResponseRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),
+    ]
 
-        avg_faithfulness = float(results["faithfulness"].mean())
-        avg_relevancy = float(results["answer_relevancy"].mean())
+    dataset = build_eval_dataset(openai_client)
 
-        print("\nMeetMind RAG Evaluation Results")
+    scores = evaluate(
+        dataset=dataset,
+        metrics=metrics,
+    )
 
-        for _, row in results.iterrows():
-            print(f"\nQuestion: {row['question']}")
-            print(f"Faithfulness: {row['faithfulness']:.2f}")
-            print(f"Answer Relevancy: {row['answer_relevancy']:.2f}")
+    results = scores.to_pandas()
 
-        print(f"\nAverage Faithfulness: {avg_faithfulness:.2f}")
-        print(f"Average Answer Relevancy: {avg_relevancy:.2f}")
+    # Ragas output names vary by release: "response_relevancy" and
+    # "answer_relevancy" are both used in the wild.
+    faith_col = "faithfulness"
+    rel_col = _resolve_relevancy_column(results)
+    q_col = "user_input"
 
-        assert avg_faithfulness >= 0.70
-        assert avg_relevancy >= 0.70
+    avg_faithfulness = float(results[faith_col].mean())
+    avg_relevancy = float(results[rel_col].mean())
 
-    finally:
-        asyncio.set_event_loop(None)
-        loop.close()
+    print("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("  MeetMind RAG Evaluation Results")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    for _, row in results.iterrows():
+        print(f"\n  Q: {row[q_col]}")
+        print(f"     faithfulness:       {row[faith_col]:.2f}")
+        print(f"     relevancy:          {row[rel_col]:.2f}")
+    print(f"\n  Average faithfulness: {avg_faithfulness:.2f}  (threshold ≥ 0.70)")
+    print(f"  Average relevancy:    {avg_relevancy:.2f}  (threshold ≥ 0.70)")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+    assert avg_faithfulness >= 0.70, (
+        f"Faithfulness {avg_faithfulness:.2f} below 0.70. "
+        "The summarization is hallucinating. See per-question scores above."
+    )
+    assert avg_relevancy >= 0.70, (
+        f"Response relevancy {avg_relevancy:.2f} below 0.70. "
+        "The summary is losing key facts. See per-question scores above."
+    )

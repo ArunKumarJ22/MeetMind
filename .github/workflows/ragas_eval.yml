@@ -1,6 +1,8 @@
-
 name: RAG Quality Evaluation
 
+# Runs on every PR to main and on every push to main.
+# If faithfulness or answer_relevancy drops below threshold, the check fails
+# and the merge is blocked.
 on:
   pull_request:
     branches: [main]
@@ -16,40 +18,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: ai-pipeline/requirements-ragas.txt
+          cache-dependency-path: ai-pipeline/requirements.txt
 
-      - name: Install MeetMind package
+      - name: Install ai-pipeline package and eval dependencies
         working-directory: ai-pipeline
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+          pip install -e .
+          pip install ragas pytest langchain-openai
 
-      - name: Install evaluation dependencies
-        working-directory: ai-pipeline
-        run: |
-          python -m pip install -r requirements-ragas.txt
-
-      - name: Check dependency consistency
-        working-directory: ai-pipeline
-        run: |
-          python -m pip check
-
-      - name: Run RAGAS evaluation
+      - name: Run Ragas evaluation
         working-directory: ai-pipeline
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          python -m pytest evaluation/ragas_eval.py -v -s \
+          pytest evaluation/ragas_eval.py -v -s \
             --tb=short \
             --junit-xml=eval-results.xml
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@v4
+        # always upload — even on failure, so you can read the scores
         if: always()
         with:
           name: ragas-eval-results
