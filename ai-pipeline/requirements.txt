@@ -1,7 +1,15 @@
+
 openai>=1.30.0
 pinecone>=5.0.0
 pydantic>=2.6.0
 python-dotenv>=1.0.1
 tenacity>=8.2.3
 numpy>=1.26.0
+
+# RAG evaluation
+ragas==0.4.3
+langchain-openai
+langchain-community==0.3.31
+
+# Testing
 pytest>=8.0.0
