@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from .config import settings
 from .database import init_db
 from .rate_limit import limiter
-from .routers import auth, documents, rooms, sessions, websocket
+from .routers import auth, documents, qa, rooms, sessions, websocket
 from .services import pubsub
 from .services.retention import start_retention_job
 
@@ -46,6 +46,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(documents.router)
+app.include_router(qa.router)  
 app.include_router(websocket.router)
 app.include_router(rooms.router)
 

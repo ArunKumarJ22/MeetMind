@@ -187,6 +187,22 @@ export const api = {
     const params = new URLSearchParams({ user_id: userId, name });
     return `${wsBase}/ws/rooms/${roomId}?${params.toString()}`;
   },
+  async askSession(
+  token: string | null,
+  sessionId: string,
+  question: string,
+): Promise<Response> {
+  // Returns the raw Response so the caller can read the SSE stream.
+  // The MeetingQA component handles the streaming itself.
+  return fetch(`${API_URL}/sessions/${sessionId}/ask`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ question }),
+  });
+},
 };
 
 export { ApiError };

@@ -11,8 +11,11 @@ import { ProcessingStages } from "../../components/ProcessingStages";
 import { TranscriptView } from "../../components/TranscriptView";
 import { AudioPlayer, AudioPlayerHandle } from "../../components/AudioPlayer";
 import { api } from "../../lib/api";
+import { MeetingQA } from "../../components/MeetingQA";
+import { useAuth } from "../../lib/auth-context";
 
 export default function TeamSessionPage({ params }: { params: { sessionId: string } }) {
+  const { token } = useAuth();
   const { session, stage, error } = useLiveSession(params.sessionId);
   const playerRef = useRef<AudioPlayerHandle>(null);
 
@@ -77,6 +80,10 @@ export default function TeamSessionPage({ params }: { params: { sessionId: strin
             <h2 className="mb-4 font-display text-lg font-medium text-paper">Documents</h2>
             <DocumentPanel sessionId={session.id} retrieved={session.retrieved_documents ?? []} />
           </section>
+
+          {session.status === "completed" && (
+            <MeetingQA sessionId={session.id} token={token} />
+          )}
 
           {session.transcript && (
             <section>

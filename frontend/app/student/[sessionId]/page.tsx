@@ -10,8 +10,11 @@ import { ProcessingStages } from "../../components/ProcessingStages";
 import { TranscriptView } from "../../components/TranscriptView";
 import { AudioPlayer, AudioPlayerHandle } from "../../components/AudioPlayer";
 import { api } from "../../lib/api";
+import { MeetingQA } from "../../components/MeetingQA";
+import { useAuth } from "../../lib/auth-context";
 
 export default function StudentSessionPage({ params }: { params: { sessionId: string } }) {
+  const { token } = useAuth();
   const { session, stage, error } = useLiveSession(params.sessionId);
   const playerRef = useRef<AudioPlayerHandle>(null);
 
@@ -78,8 +81,12 @@ export default function StudentSessionPage({ params }: { params: { sessionId: st
               <TranscriptView segments={session.transcript.segments} onSeek={seekTo} />
             </section>
           )}
+          {session.status === "completed" && (
+            <MeetingQA sessionId={session.id} token={token} />
+          )}
         </div>
       )}
+
     </div>
   );
 }
