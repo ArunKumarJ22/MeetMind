@@ -7,9 +7,11 @@ venv/
 .venv/
 *.db
 
-# Env files
+# Environment files
 .env
 .env.local
+.env.*
+!.env.example
 
 # Backend uploads
 backend/uploads/
@@ -22,4 +24,3 @@ next-env.d.ts
 
 # OS
 .DS_Store
-

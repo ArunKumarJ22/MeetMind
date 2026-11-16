@@ -9,7 +9,7 @@ from ..database import get_db
 from ..rate_limit import limiter
 from ..models import MeetingSession, Room, User
 from ..schemas import SessionListItem, SessionOut
-from ..services.pipeline_service import run_pipeline_job
+from ..services.pipeline_service import enqueue_pipeline_job
 from ..services.rooms import generate_room_code
 from ..services.storage_service import delete_audio, save_audio
 
@@ -63,8 +63,8 @@ async def create_session(
 
     # Runs after the response is sent — the client gets a session id immediately and
     # polls (or listens on the WebSocket) for status updates.
-    background_tasks.add_task(run_pipeline_job, session.id)
-
+    enqueue_pipeline_job(session.id)
+    
     return SessionOut.from_model(session)
 
 

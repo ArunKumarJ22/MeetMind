@@ -25,6 +25,8 @@ class Settings:
     # instance (see services/pubsub.py, services/room_manager.py). Empty = in-memory
     # fallback, which is fine for a single dev/demo process.
     redis_url: str = os.getenv("REDIS_URL", "")
+    use_celery: bool = os.getenv("USE_CELERY", "false").lower() == "true"
+    celery_broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 
     # Rate limiting / upload guardrails
     max_upload_size_mb: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "200"))
