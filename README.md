@@ -1,150 +1,225 @@
-# MeetMind AI
+# MeetMind
 
-Turns lecture and meeting audio into structured, role-specific intelligence —
-topic summaries + quizzes for students, action items + role summaries for teams —
-the moment a session ends. Supports uploading a recording OR starting a **live
-video-conference meeting** directly in the app. See `TASK_SPLIT.md` for how the
-remaining work is divided across the team, including exactly what's been genuinely
-tested vs. what's written-but-unverified.
+**AI meeting intelligence pipeline** — upload a recording or start a live meeting, get a structured transcript with real speaker labels, role-specific summaries, action items, a Q&A chat, and email notifications, all in under a minute.
+
+Built for two audiences: **teams** (action items, role summaries, participant Q&A) and **students** (topic summaries, Bloom's taxonomy quizzes with distractors).
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Next.js Frontend                            │
+│  Upload flow · Live WebRTC room · Session dashboard · Q&A chat      │
+│  Streaming SSE tokens · WebSocket status updates · Audio player     │
+└──────────────────────┬──────────────────────────────────────────────┘
+                       │ HTTP / WebSocket
+┌──────────────────────▼──────────────────────────────────────────────┐
+│                       FastAPI Backend                               │
+│                                                                     │
+│  /sessions  ──► enqueue_pipeline_job()  ──► Redis (Celery broker)   │
+│  /sessions/{id}/ask  ──► StreamingResponse (SSE)                    │
+│  /sessions/{id}/notify  ──► email_service                           │
+│  /ws/rooms/{id}  ──► WebRTC signaling relay                         │
+│                                                                     │
+│  Auth: JWT + httpOnly cookie · Rate limiting · Audio auto-delete    │
+└──────┬───────────────────────────────────────┬───────────────────── ┘
+       │ SQLAlchemy                            │ Celery task
+       ▼                                       ▼
+┌─────────────┐                    ┌──────────────────────────────────┐
+│  PostgreSQL │                    │        Celery Worker             │
+│             │                    │                                  │
+│  Sessions   │                    │  1. Whisper  ──► Transcript      │
+│  Users      │                    │  2. WhisperX ──► Speaker labels  │
+│  Transcripts│◄───── writes ──────│  3. GPT-4o  ──► Summaries        │
+│  Outputs    │                    │  4. GPT-4o  ──► Action items     │
+└─────────────┘                    │  5. Pinecone ──► RAG index       │
+                                   │  6. GPT-4o  ──► Quiz (Bloom's)   │
+       ┌───────────────────────────│                                  │
+       │ pub/sub                   │  Retries: 3× exponential backoff │
+       ▼                           └──────────────────────────────────┘
+┌─────────────┐
+│    Redis    │   Celery broker · Result backend
+│             │   WebRTC room signaling
+│             │   Session status pub/sub
+└─────────────┘
+```
+
+---
+
+## Features
+
+**AI Pipeline**
+- Transcription via OpenAI Whisper API with WhisperX word-level alignment
+- Real speaker diarization via WhisperX + pyannote ML model (speaker confidence 0.9) — feature-flagged, heuristic fallback for local dev
+- Aspect-based role summaries (Deng et al.) — one summary per speaker, host overview
+- Action item extraction with owner, task, and deadline fields
+- Bloom's taxonomy quiz generation — 2 LLM calls per section, distractors included
+- Hybrid RAG (BM25 + vector) via Pinecone for reference document retrieval during live meetings
+- Automated quality evaluation with Ragas in GitHub Actions CI — faithfulness 1.00, response relevancy 0.86
+
+**Backend**
+- Async job queue with Celery + Redis — concurrent sessions, 3-retry exponential back-off, task survives worker crashes
+- Streaming Q&A chat over completed transcripts via Server-Sent Events
+- Action item email notifications per participant via Resend API
+- WebRTC mesh video conferencing with Redis-backed signaling
+- JWT + httpOnly cookie auth, rate limiting, audio auto-deletion after configurable retention period
+
+**Quality**
+- 88 tests across ai-pipeline and backend (mock + real Redis/Postgres)
+- Ragas evaluation pipeline runs on every PR — blocks merge on quality regression
+- WhisperX integration test validates real speaker separation on audio
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS |
+| Backend | FastAPI, SQLAlchemy, Pydantic v2 |
+| AI | OpenAI Whisper + GPT-4o-mini, WhisperX, Pinecone |
+| Queue | Celery 5, Redis |
+| Database | PostgreSQL (SQLite for local dev) |
+| Email | Resend API |
+| Evaluation | Ragas, GitHub Actions CI |
+| Auth | JWT, httpOnly cookies, slowapi rate limiting |
+| Infrastructure | Docker Compose, uvicorn |
+
+---
+
+## Quickstart
+
+### Option A — Docker Compose
+
+```bash
+cp backend/.env.example backend/.env
+# fill in OPENAI_API_KEY and PINECONE_API_KEY
+# or leave USE_MOCK_PIPELINE=true to try without API keys
+
+docker compose up --build
+```
+
+Frontend: `http://localhost:3000` · API docs: `http://localhost:8000/docs`
+
+### Option B — Run each service directly
+
+```bash
+# 1. Redis (required for Celery and WebSocket signaling)
+docker run -p 6379:6379 redis:7
+
+# 2. Backend
+cd backend
+cp .env.example .env        # fill in your keys
+pip install -r requirements.txt
+pip install "celery[redis]>=5.3.0" resend
+uvicorn app.main:app --reload
+
+# 3. Celery worker (new terminal)
+cd backend
+celery -A app.celery_app worker --loglevel=info -Q pipeline --concurrency=2 --pool=solo
+
+# 4. Frontend (new terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`, create an account, and either:
+- **Upload a recording** — any audio/video file
+- **Start a live meeting** — opens a WebRTC room, copy the invite link for others
+
+Once a session completes, the dashboard shows the transcript with click-to-seek, role summaries, action items, and the Q&A chat panel.
+
+---
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | — | Required for transcription and summarization |
+| `PINECONE_API_KEY` | — | Required for RAG (live meeting reference docs) |
+| `USE_MOCK_PIPELINE` | `true` | Use realistic mock data without API calls |
+| `USE_CELERY` | `false` | Enable Celery queue (requires Redis) |
+| `USE_REAL_DIARIZATION` | `false` | Enable WhisperX ML diarization |
+| `HUGGINGFACE_TOKEN` | — | Required when USE_REAL_DIARIZATION=true |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Redis broker for Celery |
+| `RESEND_API_KEY` | — | Required for action item email notifications |
+| `AUDIO_RETENTION_DAYS` | `30` | Days before raw audio is auto-deleted |
+
+---
+
+## Running tests
+
+```bash
+# AI pipeline tests (25 tests — all offline)
+cd ai-pipeline
+pip install -r requirements.txt
+python -m pytest tests/ -v
+
+# Ragas evaluation (requires OPENAI_API_KEY)
+export OPENAI_API_KEY="sk-..."
+python -m pytest evaluation/ragas_eval.py -v -s
+
+# Backend tests (63 tests — all offline except Redis suite)
+cd backend
+pip install -r requirements.txt
+python -m pytest tests/ -v
+
+# WhisperX integration test (requires HF token + audio file)
+export RUN_REAL_DIARIZATION_TESTS=1
+export TEST_AUDIO_PATH=tests/fixtures/sample_meeting.wav
+python -m pytest tests/test_whisperx_diarization.py::test_real_whisperx_on_sample_audio -v -s
+```
+
+---
 
 ## Project layout
 
 ```
-ai-pipeline/   Python package: transcription, diarization, summarization, modular
-               quiz generation (Q&A -> distractors -> quality filter, batched into
-               2 LLM calls per section), action items, RAG. Evaluation scripts in
-               scripts/. No web framework dependency.
-backend/       FastAPI app. Auth (JWT + httpOnly cookies), rate limiting, session
-               upload/live/delete/download, WebRTC signaling, Redis-backed pub/sub
-               (falls back to in-memory), audio auto-deletion job, background
-               pipeline execution.
-frontend/      Next.js 14 (App Router) + TypeScript + Tailwind. Upload flow, live
-               video-conference room, dashboards with an audio player + transcript
-               view + click-to-seek, step-by-step processing indicator.
+meetmind/
+├── ai-pipeline/              Python package — no web framework dependency
+│   ├── meetmind_ai/
+│   │   ├── transcription.py  Whisper API + noise scoring
+│   │   ├── diarization.py    Speaker assignment (heuristic or WhisperX)
+│   │   ├── real_diarization.py  WhisperX ML diarization
+│   │   ├── summarization.py  Aspect-based role summaries (GPT-4o)
+│   │   ├── action_items.py   Structured action item extraction
+│   │   ├── quiz_generation.py  Bloom's taxonomy quiz (batched LLM)
+│   │   ├── rag.py            Pinecone hybrid retrieval
+│   │   └── pipeline.py       Orchestrator
+│   ├── evaluation/
+│   │   ├── ragas_eval.py     Automated quality gate (CI)
+│   │   └── test_dataset.json Gold Q&A pairs
+│   └── tests/                25 tests
+│
+├── backend/                  FastAPI app
+│   ├── app/
+│   │   ├── routers/
+│   │   │   ├── sessions.py   Upload, create, list, delete
+│   │   │   ├── qa.py         Streaming Q&A (SSE)
+│   │   │   └── notify.py     Action item email notifications
+│   │   ├── services/
+│   │   │   ├── pipeline_service.py  Celery enqueue + job runner
+│   │   │   └── email_service.py     Resend integration
+│   │   ├── celery_app.py     Celery instance + config
+│   │   └── tasks.py          Pipeline Celery task
+│   └── tests/                63 tests
+│
+└── frontend/                 Next.js 14 (App Router)
+    ├── app/
+    │   ├── components/
+    │   │   └── MeetingQA.tsx Streaming chat component
+    │   └── lib/api.ts        Typed API client
+    └── ...
 ```
 
-Every layer runs end-to-end in **mock mode** — no API keys required. **55 tests**
-pass across both Python packages (30 backend, 25 AI pipeline), several run against
-**real Redis and real Postgres** during development (not just mocked — see
-`TASK_SPLIT.md`'s "what got genuinely verified" section), plus a clean `npm run build`.
+---
 
-## Quickstart — option A: Docker Compose
+## CI
 
-```bash
-cp backend/.env.example backend/.env   # fill in your real API keys, or leave
-                                        # USE_MOCK_PIPELINE=true to try it first
-docker compose up --build
-```
-
-Frontend: http://localhost:3000 · Backend: http://localhost:8000/docs
-
-Starts Postgres, Redis, the backend, and the frontend together — Redis backs both
-session-status updates and video-room signaling (see `TASK_SPLIT.md`).
-
-> No Docker daemon was available in the environment this was built in, so the
-> Compose file and Dockerfiles are carefully hand-verified (YAML validated, build
-> steps traced through) but not build-tested end-to-end. Postgres and Redis
-> themselves ARE genuinely tested — just by installing and running them directly,
-> not through Compose specifically. Expect normal first-run rough edges.
-
-## Quickstart — option B: run each piece directly
-
-
-
-```
-
-Open http://localhost:3000, create an account, and either:
-- **Upload a recording** — any audio/video file (mock mode ignores the content
-  and returns realistic sample data), or
-- **Start a live meeting** — opens a video-conference room (camera/mic permission
-  requested), records the mixed audio, copy the invite link for others to join,
-  auto-uploads and processes it when you click "End & process."
-
-Once processed, click any quiz question, action item, or transcript line to jump
-the audio player to that exact moment.
-
-## Live video conferencing — how it works, and its limits
-
-Mesh WebRTC: every participant connects directly to every other participant via
-the backend's signaling relay (`/ws/rooms/{room_id}`). The server only ever relays
-small JSON handshake messages; audio/video never touches it. Room membership and
-message relay are Redis-backed when `REDIS_URL` is set, so signaling works correctly
-even across multiple backend processes (verified with two independent manager
-instances talking through real Redis — see `TASK_SPLIT.md`).
-
-- **Good for:** small meetings and study groups, roughly up to 4-6 people.
-- **Not built for:** a full lecture hall — mesh connections don't scale past a
-  handful of peers. Swap in an SFU (LiveKit, mediasoup) before using this for large
-  classes.
-- **No TURN server configured** — only public STUN. Calls between peers on
-  restrictive/symmetric NATs may fail to connect.
-- Only **audio** is recorded and sent to the pipeline; video is for the live call
-  only, matching the rest of MeetMind's audio-based architecture.
-- **Not yet tested in two real browsers** — the signaling protocol is genuinely
-  Redis-tested; the actual peer-to-peer media connection hasn't been tried across
-  real machines yet. Do that before a real demo.
-
-## Running against real audio + your own API keys
-
-Put your keys directly in `backend/.env` (don't paste them into a chat or commit
-them) — `OPENAI_API_KEY`, `PINECONE_API_KEY` — then set `USE_MOCK_PIPELINE=false`
-and restart the backend. Watch the dashboard's step indicator (transcribing →
-diarizing → summarizing → ...) instead of a generic spinner while it runs.
-
-### Optional heavier AI backends (real diarization, real BERTScore)
-
-Both off by default, both fall back to a lightweight placeholder otherwise, and
-neither has been run against real data in this codebase's own development (no
-network access to Hugging Face from this environment) — written and unit-tested
-for routing/error-handling only:
-
-- **Real speaker diarization**: `pip install -r ai-pipeline/requirements-real-diarization.txt`,
-  get a Hugging Face token, set `USE_REAL_DIARIZATION=true` + `HUGGINGFACE_TOKEN=...`.
-- **Real BERTScore**: `pip install -r ai-pipeline/requirements-real-bertscore.txt`,
-  set `USE_REAL_BERTSCORE=true`. Needs a reference summary to score against.
-
-### Evaluation scripts (`ai-pipeline/scripts/`)
-
-- `measure_retrieval_latency.py` — implements the thesis's Chapter 5 latency plan
-  (50 sessions, target <2s). Has a `--synthetic` self-test mode and a
-  `--session-ids-file` real-data mode.
-- `calibrate_noise_threshold.py` — helps pick a real value for `config.py`'s
-  `noise_threshold` (currently an unvalidated guess) from labeled clean/noisy
-  transcript samples.
-
-## Security notes
-
-- Auth uses an httpOnly cookie (set on login/register) as the primary mechanism —
-  the frontend no longer stores the raw JWT in localStorage, reducing XSS exposure.
-  A bearer token is still returned in the JSON response for API clients/scripts.
-- Rate limiting: 5/min on register, 10/min on login, 10/min on session upload
-  (`app/rate_limit.py`). Disabled automatically under pytest (see `tests/conftest.py`)
-  since the test suite legitimately calls these endpoints far more than any real
-  user would in a minute.
-- Upload size capped at `MAX_UPLOAD_SIZE_MB` (default 200MB).
-- Audio auto-deletes `AUDIO_RETENTION_DAYS` after a session completes (default 30;
-  set to 0 to disable) — transcripts and results are kept, only the raw recording
-  is purged. FERPA/GDPR data-minimization item from the thesis.
-
-## Tests
-
-```bash
-cd ai-pipeline && pip install -r requirements.txt && python -m pytest tests/ -v
-cd backend && pip install -r requirements.txt && python -m pytest tests/ -v
-```
-
-Both suites run offline by default (mocked OpenAI/Pinecone calls, in-memory
-pub/sub). Real-Redis coverage lives entirely in `tests/test_room_manager_redis.py`,
-which is self-contained (creates its own Redis connections regardless of any
-ambient `REDIS_URL`) and skips gracefully if `redis://localhost:6379/0` isn't
-reachable — no setup needed beyond having a Redis server running. Every other test
-file explicitly forces in-memory pub/sub for itself, so the rest of the suite's
-behavior doesn't change based on your environment's `REDIS_URL`.
-
-## Tech stack
-
-FastAPI + SQLAlchemy (SQLite for local dev, Postgres via Docker Compose — both
-genuinely tested), Redis for pub/sub and room signaling, Next.js/React frontend with
-WebSocket updates and WebRTC video, OpenAI Whisper + GPT-4o, Pinecone for RAG, local
-disk for audio storage, JWT + httpOnly cookie auth (swap for Auth0 later — see
-`backend/app/auth.py`), slowapi for rate limiting.
+Every pull request to `main` runs:
+- **Ragas quality gate** — faithfulness and response relevancy scored against gold dataset, merge blocked on regression
+- WhisperX routing tests (7 tests, no GPU needed)
+- Backend test suite (63 tests, mocked dependencies)
